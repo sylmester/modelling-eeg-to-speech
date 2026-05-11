@@ -245,10 +245,10 @@ def aad_classifier(predictors, subjects,
             FUGLSANG_EEG_DIR / subject / f'{subject}_eeg.pickle'
         )
         true_att = eelbrain.load.unpickle(
-            FUGLSANG_PREDICTOR_DIR / subject / f'{att_predictor_name}_concat.pickle'
+            FUGLSANG_PRED_CONCAT_SELF_DIR / subject / f'{att_predictor_name}_concat.pickle'
         ).x
         true_ign = eelbrain.load.unpickle(
-            FUGLSANG_PREDICTOR_DIR / subject / f'{ign_predictor_name}_concat.pickle'
+            FUGLSANG_PRED_CONCAT_SELF_DIR / subject / f'{ign_predictor_name}_concat.pickle'
         ).x
 
         if (aad_type == AAD_APPROACH.DOUBLE):
