@@ -11,31 +11,43 @@ def load_trfs(dataset, subjects, checks, trf_dir):
     """
     Load TRFs for all subjects and checks.
 
+    checks: list of tuples (predictor, attention, model_type) 
+            or (predictor, attention, model_type, padded)
+            padded defaults to False if not provided.
+
     Returns:
         trf_data:   dict keyed by model_name -> list of TRFs (one per subject)
         n_subjects: number of subjects successfully loaded
     """
-    subjects  = subjects
-    trf_data  = {get_trf_model_name(dataset, p, a, m): [] for p, a, m in checks}
-    skipped   = []
-    loaded    = []
+
+    def unpack_check(check):
+        """Unpack check tuple, defaulting padded to False if not provided."""
+        if len(check) == 4:
+            p, a, m, padded = check
+        else:
+            p, a, m = check
+            padded = False
+        return p, a, m, padded
+
+    # unpack all checks upfront
+    unpacked = [unpack_check(c) for c in checks]
+
+    g = GENERALISATION_TYPE.INDIVIDUAL
+    trf_data = {get_trf_model_name(dataset, p, a, m, g, padded): [] 
+                for p, a, m, padded in unpacked}
+    skipped  = []
+    loaded   = []
 
     for subject in subjects:
         missing = []
-        for p, a, m in checks:
+        for p, a, m, padded in unpacked:
+            name = get_trf_model_name(dataset, p, a, m, g, padded)
             if dataset == DATASET_TYPE.FUGLSANG:
-                if not (trf_dir / subject / f"{subject}_{get_trf_model_name(dataset, p, a, m)}_trf.pickle").exists():
-                    missing.append(get_trf_model_name(dataset, p, a, m))
+                path = trf_dir / subject / f"{subject}_{name}_trf.pickle"
             elif dataset == DATASET_TYPE.ALICE:
-                if not (trf_dir / subject / f"{subject} 64hz-{get_trf_model_name(dataset, p, a, m)}.pickle").exists():
-                    missing.append(get_trf_model_name(dataset, p, a, m))
-        '''
-        missing = [
-            get_trf_model_name(dataset, p, a, m)
-            for p, a, m in checks
-            if not (trf_dir / subject / f"{subject}_{get_trf_model_name(dataset, p, a, m)}_trf.pickle").exists()
-        ]
-        '''
+                path = trf_dir / subject / f"{subject} 64hz-{name}.pickle"
+            if not path.exists():
+                missing.append(name)
 
         if missing:
             print(f"  ✗ {subject}: skipping — missing {len(missing)} TRF(s):")
@@ -44,8 +56,8 @@ def load_trfs(dataset, subjects, checks, trf_dir):
             skipped.append(subject)
             continue
 
-        for p, a, m in checks:
-            name = get_trf_model_name(dataset, p, a, m)
+        for p, a, m, padded in unpacked:
+            name = get_trf_model_name(dataset, p, a, m, g, padded)
             if dataset == DATASET_TYPE.FUGLSANG:
                 path = trf_dir / subject / f"{subject}_{name}_trf.pickle"
             elif dataset == DATASET_TYPE.ALICE:
@@ -59,8 +71,7 @@ def load_trfs(dataset, subjects, checks, trf_dir):
     if skipped:
         print(f"  Skipped: {skipped}")
 
-    n_subjects = len(loaded)
-    return trf_data, n_subjects    
+    return trf_data, len(loaded)  
 
 
 def get_predictor_name(predictors, padded=False) -> str:
@@ -211,6 +222,87 @@ def aad_double_classifier(eeg, true_att, true_ign, att_trf, ign_trf):
     return r_att > r_ign, r_att, r_ign
 
 
+
+def aad_single_classifier_forward(att_pred, ign_pred, eeg, trf):
+    """
+    Single TRF forward AAD classifier.
+    Convolves TRF with attended and ignored predictors to reconstruct EEG,
+    correlates each reconstruction with true EEG per sensor, then averages.
+
+    Parameters
+    ----------
+    att_pred : NDVar
+        Attended predictor for this trial.
+    ign_pred : NDVar
+        Ignored predictor for this trial.
+    eeg : NDVar
+        True EEG for this trial (sensors x time).
+    trf : BoostingResult
+        Estimated forward TRF.
+
+    Returns
+    -------
+    correct : bool
+    r_att : float
+    r_ign : float
+    """
+    rec_att = eelbrain.convolve(trf.h_scaled, att_pred).x
+    rec_ign = eelbrain.convolve(trf.h_scaled, ign_pred).x
+
+    eeg_data = eeg.get_data(('sensor', 'time'))  # (n_sensors, n_time)
+
+    # align lengths
+    n = min(eeg_data.shape[1], rec_att.shape[-1], rec_ign.shape[-1])
+    eeg_data = eeg_data[:, :n]
+    rec_att  = rec_att[..., :n]
+    rec_ign  = rec_ign[..., :n]
+
+    # correlate per sensor then average
+    r_att = float(np.mean([
+        np.abs(np.corrcoef(eeg_data[i], rec_att[i])[0, 1])
+        for i in range(eeg_data.shape[0])
+    ]))
+    r_ign = float(np.mean([
+        np.abs(np.corrcoef(eeg_data[i], rec_ign[i])[0, 1])
+        for i in range(eeg_data.shape[0])
+    ]))
+
+    correct = r_att > r_ign
+    return correct, r_att, r_ign
+
+
+def aad_double_classifier_forward(att_pred, ign_pred, eeg, att_trf, ign_trf):
+    """
+    Works for both single and multivariate forward TRFs.
+    att_pred and ign_pred can be NDVar or list of NDVar.
+    """
+    # eelbrain.convolve accepts a list of NDVars for multivariate TRFs
+    rec_att = eelbrain.convolve(att_trf.h_scaled, att_pred).x
+    rec_ign = eelbrain.convolve(ign_trf.h_scaled, ign_pred).x
+
+    eeg_data = eeg.get_data(('sensor', 'time'))
+
+    n = min(eeg_data.shape[1], rec_att.shape[-1], rec_ign.shape[-1])
+    eeg_data = eeg_data[:, :n]
+    rec_att  = rec_att[..., :n]
+    rec_ign  = rec_ign[..., :n]
+
+    r_att = float(np.mean([
+        np.abs(np.corrcoef(eeg_data[i], rec_att[i])[0, 1])
+        for i in range(eeg_data.shape[0])
+    ]))
+    r_ign = float(np.mean([
+        np.abs(np.corrcoef(eeg_data[i], rec_ign[i])[0, 1])
+        for i in range(eeg_data.shape[0])
+    ]))
+
+    correct = r_att > r_ign
+    return correct, r_att, r_ign
+
+
+
+
+
 def aad_classifier(predictors, subjects, 
                    generalised=GENERALISATION_TYPE.AVERAGE, 
                    cv=CROSS_VALIDATION_TYPE.HOLD_OUT, aad_type = AAD_APPROACH.SINGLE):
@@ -280,6 +372,44 @@ def fuglsang_get_subjects():
     subjects = [path.stem.split("_")[0] for path in FUGLSANG_DATA_PREPROC.glob("*.mat")]
     subjects = sorted(subjects, key=lambda x: int(re.search(r'S(\d+)', x).group(1)))
     return subjects
+
+def get_subject_data_file(subject: str):
+    return FUGLSANG_DATA_PREPROC / f"{subject}_data_preproc.mat"
+
+# Utility function to get stimulus paths --------------------------------------------------
+def get_stimuli_paths():
+    return [stimulus.stem for stimulus in FUGLSANG_STIMULUS_DIR.glob("*.wav")]
+
+def get_trials(subject):
+    csv_path = os.path.join(FUGLSANG_DATA_RAW, f'{subject}_expinfo.csv')
+    
+    if not os.path.exists(csv_path):
+        print(f"Missing expinfo CSV for {subject}: {csv_path}")
+        return {}
+
+    expinfo = pd.read_csv(csv_path)
+    trials  = {}
+    trial_idx = 0
+
+    for _, row in expinfo.iterrows():
+        if row['n_speakers'] == 1:
+            continue
+
+        if row['attend_mf'] == 1:
+            attended_wavfile = Path(row['wavfile_male']).stem.strip("'\"")
+            ignored_wavfile  = Path(row['wavfile_female']).stem.strip("'\"")
+        else:
+            attended_wavfile = Path(row['wavfile_female']).stem.strip("'\"")
+            ignored_wavfile  = Path(row['wavfile_male']).stem.strip("'\"")
+
+        trials[trial_idx] = {
+            'attended': attended_wavfile,
+            'ignored':  ignored_wavfile
+        }
+        trial_idx += 1
+
+    print(f"{subject}: loaded {len(trials)} trials")
+    return trials
 
 # =============================================================================
 # ALICE FUNCTIONS
@@ -489,7 +619,7 @@ def binomial_test(n_correct, n_total, alternative='greater'):
     -------
     dict with accuracy, p-value.
     """
-    result = stats.binomtest(n_correct, n_total, p=0.5, alternative=alternative)
+    result = stats.binomtest(n_correct, n_total, p=0.5, alternative=alternative) # use one tail since we only care about above-chance accuracy
     return {
         'accuracy': n_correct / n_total,
         'p': result.pvalue,
@@ -498,47 +628,65 @@ def binomial_test(n_correct, n_total, alternative='greater'):
     }
 
 
-def mcnemar_test(correct_a, correct_b):
+def mcnemar_test(correct_a, correct_b, exact='auto'):
     """
     McNemar's test for paired binary classification outcomes.
-    Automatically uses exact binomial test when n10 + n01 < 25,
-    otherwise uses chi-squared approximation.
+    Implemented entirely via scipy.stats:
+      - Uses scipy.stats.binomtest for exact test
+      - Uses scipy.stats.chi2 for chi-squared approximation
 
     Parameters
     ----------
     correct_a : array-like of bool
-        Whether each subject was correctly classified by model A.
+        Whether each subject/trial was correctly classified by model A.
     correct_b : array-like of bool
-        Whether each subject was correctly classified by model B.
+        Whether each subject/trial was correctly classified by model B.
+    exact : bool or 'auto'
+        If True, always use exact binomial test.
+        If False, always use chi-squared approximation.
+        If 'auto' (default), use exact when n_discordant < 25.
 
     Returns
     -------
-    dict with n10, n01, p-value, and which test was used.
+    dict with discordant counts, p-value, and which test was used.
     """
     correct_a = np.array(correct_a, dtype=bool)
     correct_b = np.array(correct_b, dtype=bool)
 
-    # discordant pairs
     n10 = np.sum(correct_a & ~correct_b)   # A correct, B wrong
     n01 = np.sum(~correct_a & correct_b)   # A wrong, B correct
     n_discordant = n10 + n01
 
-    if n_discordant < 25:
-        # exact binomial test on discordant pairs
-        # under H0, each discordant pair is equally likely to favour A or B
+    if n_discordant == 0:
+        return {
+            'n10': 0,
+            'n01': 0,
+            'n_discordant': 0,
+            'p': 1.0,
+            'test_used': 'none (no discordant pairs)',
+        }
+
+    # determine whether to use exact test
+    if exact == 'auto':
+        use_exact = n_discordant < 25
+    elif isinstance(exact, bool):
+        use_exact = exact
+    else:
+        raise ValueError("exact must be True, False, or 'auto'")
+
+    if use_exact:
         result = stats.binomtest(n10, n_discordant, p=0.5, alternative='two-sided')
         p = result.pvalue
-        test_used = 'exact binomial'
+        test_used = f'exact binomial (n_discordant={n_discordant})'
     else:
-        # chi-squared approximation
-        chi2 = (n10 - n01) ** 2 / (n10 + n01)
-        p = stats.chi2.sf(chi2, df=1)
-        test_used = 'chi-squared approximation'
+        chi2_stat = (n10 - n01) ** 2 / (n10 + n01)
+        p = stats.chi2.sf(chi2_stat, df=1)
+        test_used = f'chi-squared approximation (n_discordant={n_discordant})'
 
     return {
-        'n10': n10,
-        'n01': n01,
-        'n_discordant': n_discordant,
+        'n10': int(n10),
+        'n01': int(n01),
+        'n_discordant': int(n_discordant),
         'p': p,
         'test_used': test_used,
     }

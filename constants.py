@@ -1,6 +1,32 @@
 from dependencies import *
 
 # =============================================================================
+# SIGNAL PROCESSING
+# =============================================================================
+
+GAMMATONE_SPECTROGRAM_BANDS      = 128
+GAMMATONE_FREQUENCY_RANGE_LOW    = 80
+GAMMATONE_FREQUENCY_RANGE_HIGH   = 15000
+
+EEG_SAMPLING_RATE                = 64
+EEG_BANDPASS_FILTER_LOW          = 0.5
+EEG_BANDPASS_FILTER_HIGH         = 20
+
+PADDING_ONSET                    = 0.1
+PADDING_OFFSET                   = 1.0
+
+# =============================================================================
+# TRF
+# =============================================================================
+
+TRF_LAG_START                    = -0.100
+TRF_LAG_END                      =  1.000
+BASIS_FUNCTION_WIDTH             =  0.050
+
+
+
+
+# =============================================================================
 # ENUM CLASSES
 # =============================================================================
 
@@ -29,6 +55,7 @@ class CROSS_VALIDATION_TYPE(Enum):
 class DATASET_TYPE(Enum):
     FUGLSANG = "fuglsang"
     ALICE = "alice"
+    SNHL = "snhl"
 
 class AAD_APPROACH(Enum):
     SINGLE = "single"

@@ -1,6 +1,7 @@
 # IMPORT LIBRARIES
 import numpy as np
 import seaborn as sns
+import matplotlib
 import matplotlib.pyplot as plt
 import eelbrain
 import mne
@@ -9,6 +10,9 @@ import os
 import pandas as pd
 import scipy
 import copy
+import shutil
+import requests
+import zipfile
 
 # IMPORT MODULES
 from pathlib import Path
@@ -17,6 +21,7 @@ import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 from matplotlib.patches import FancyArrowPatch
 from matplotlib.ticker import MultipleLocator, FormatStrFormatter
+
 import matplotlib.gridspec as gridspec
 from matplotlib import colors
 from tqdm import tqdm

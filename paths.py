@@ -57,6 +57,9 @@ FUGLSANG_PRED_CONCAT_DIR        =   FUGLSANG_PREDICTOR_DIR / 'concatenated'
 FUGLSANG_PRED_CONCAT_SELF_DIR   =     FUGLSANG_PRED_CONCAT_DIR / 'self_computed'
 FUGLSANG_PRED_CONCAT_MAT_DIR    =     FUGLSANG_PRED_CONCAT_DIR / 'mat_file'
 
+FUGLSANG_AAD_RESULTS               = FUGLSANG_ROOT / 'aad-results'
+
+
 # =============================================================================
 # SNHL
 # =============================================================================
