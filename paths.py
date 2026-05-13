@@ -64,7 +64,11 @@ FUGLSANG_AAD_RESULTS               = FUGLSANG_ROOT / 'aad-results'
 # SNHL
 # =============================================================================
 
-SNHL_STIMULUS_DIR               = SNHL_ROOT / 'derivatives' / 'stimuli'
+SNHL_STIMULI_DIR                = SNHL_ROOT / 'stimuli'
+SNHL_IMPORTED_ENVELOPES_DIR     = SNHL_ROOT / 'derivatives' / 'stimuli'
+SNHL_GAMMATONE_DIR              = SNHL_ROOT / 'derivatives' / 'gammatone'
+SNHL_ENVELOPES_DIR              = SNHL_ROOT / 'derivatives' / 'envelopes'
+SNHL_ONSET_DIR                  = SNHL_ROOT / 'derivatives' / 'onsets'
 
 
 # =============================================================================
@@ -89,7 +93,7 @@ for _dir in [
     FUGLSANG_TRF_SELF_DIR, FUGLSANG_TRF_GENERAL_DIR, FUGLSANG_TRF_MAT_DIR,
     FUGLSANG_PRED_SELF_DIR, FUGLSANG_PRED_MAT_DIR, FUGLSANG_PRED_CONCAT_SELF_DIR, FUGLSANG_PRED_CONCAT_MAT_DIR,
     # SNHL
-    SNHL_STIMULUS_DIR,
+    SNHL_STIMULI_DIR, SNHL_IMPORTED_ENVELOPES_DIR,
     # BEYOND
     BEYOND_AAD_RESULTS, BEYOND_FUGLSANG_IN_SNHL_RESULTS
 ]:

@@ -7,6 +7,25 @@ from paths import *
 # GLOBAL FUNCTIONS
 # =============================================================================
 
+
+# Utility function to process predictors --------------------------------------------------
+def process_predictor(predictor, padded = False):
+    # DATA PROCESSING OF ENVELOPES
+    LOW_FREQUENCY = 0.5
+    HIGH_FREQUENCY = 20
+
+    # Resample spectrograms to 64 hz, offset and filter
+    x = predictor
+    x = x.bin(1/64, dim='time', label='start')
+    if padded:
+        x = eelbrain.pad(x, tstart=-PADDING_ONSET, tstop=x.time.tstop + PADDING_OFFSET)
+    x = eelbrain.filter_data(x, LOW_FREQUENCY, HIGH_FREQUENCY)
+    
+    return x
+
+
+
+
 def load_trfs(dataset, subjects, checks, trf_dir):
     """
     Load TRFs for all subjects and checks.
@@ -193,10 +212,8 @@ def aad_single_classifier(eeg, true_att, true_ign, trf):
     att  = att[...,  :n]
     ign  = ign[...,  :n]
 
-    r_att = np.abs(np.corrcoef(pred, att)[0, 1])
-    r_ign = np.abs(np.corrcoef(pred, ign)[0, 1])
-    #r_att = (np.corrcoef(pred, att)[0, 1])
-    #r_ign = (np.corrcoef(pred, ign)[0, 1])
+    r_att = (np.corrcoef(pred, att)[0, 1])
+    r_ign = (np.corrcoef(pred, ign)[0, 1])
     return r_att > r_ign, r_att, r_ign
 
 
@@ -216,59 +233,11 @@ def aad_double_classifier(eeg, true_att, true_ign, att_trf, ign_trf):
     n_att = min(pred_att.shape[-1], att.shape[-1])
     n_ign = min(pred_ign.shape[-1], ign.shape[-1])
 
-    r_att = np.abs(np.corrcoef(pred_att[..., :n_att], att[..., :n_att])[0, 1])
-    r_ign = np.abs(np.corrcoef(pred_ign[..., :n_ign], ign[..., :n_ign])[0, 1])
+    r_att = np.corrcoef(pred_att[..., :n_att], att[..., :n_att])[0, 1]
+    r_ign = np.corrcoef(pred_ign[..., :n_ign], ign[..., :n_ign])[0, 1]
 
     return r_att > r_ign, r_att, r_ign
 
-
-
-def aad_single_classifier_forward(att_pred, ign_pred, eeg, trf):
-    """
-    Single TRF forward AAD classifier.
-    Convolves TRF with attended and ignored predictors to reconstruct EEG,
-    correlates each reconstruction with true EEG per sensor, then averages.
-
-    Parameters
-    ----------
-    att_pred : NDVar
-        Attended predictor for this trial.
-    ign_pred : NDVar
-        Ignored predictor for this trial.
-    eeg : NDVar
-        True EEG for this trial (sensors x time).
-    trf : BoostingResult
-        Estimated forward TRF.
-
-    Returns
-    -------
-    correct : bool
-    r_att : float
-    r_ign : float
-    """
-    rec_att = eelbrain.convolve(trf.h_scaled, att_pred).x
-    rec_ign = eelbrain.convolve(trf.h_scaled, ign_pred).x
-
-    eeg_data = eeg.get_data(('sensor', 'time'))  # (n_sensors, n_time)
-
-    # align lengths
-    n = min(eeg_data.shape[1], rec_att.shape[-1], rec_ign.shape[-1])
-    eeg_data = eeg_data[:, :n]
-    rec_att  = rec_att[..., :n]
-    rec_ign  = rec_ign[..., :n]
-
-    # correlate per sensor then average
-    r_att = float(np.mean([
-        np.abs(np.corrcoef(eeg_data[i], rec_att[i])[0, 1])
-        for i in range(eeg_data.shape[0])
-    ]))
-    r_ign = float(np.mean([
-        np.abs(np.corrcoef(eeg_data[i], rec_ign[i])[0, 1])
-        for i in range(eeg_data.shape[0])
-    ]))
-
-    correct = r_att > r_ign
-    return correct, r_att, r_ign
 
 
 def aad_double_classifier_forward(att_pred, ign_pred, eeg, att_trf, ign_trf):
@@ -288,11 +257,11 @@ def aad_double_classifier_forward(att_pred, ign_pred, eeg, att_trf, ign_trf):
     rec_ign  = rec_ign[..., :n]
 
     r_att = float(np.mean([
-        np.abs(np.corrcoef(eeg_data[i], rec_att[i])[0, 1])
+        np.corrcoef(eeg_data[i], rec_att[i])[0, 1]
         for i in range(eeg_data.shape[0])
     ]))
     r_ign = float(np.mean([
-        np.abs(np.corrcoef(eeg_data[i], rec_ign[i])[0, 1])
+        np.corrcoef(eeg_data[i], rec_ign[i])[0, 1]
         for i in range(eeg_data.shape[0])
     ]))
 
@@ -361,6 +330,46 @@ def aad_classifier(predictors, subjects,
 
 
 
+# =============================================================================
+# ALICE FUNCTIONS
+# =============================================================================
+
+# Utility function to get subject list
+def alice_get_subjects():
+    subjects = [path.name for path in ALICE_EEG_DIR.iterdir() if path.is_dir()]
+    subjects = sorted(subjects, key=lambda x: int(re.search(r'S(\d+)', x).group(1)))
+    return subjects
+
+def alice_get_durations(envelope, STIMULI):
+    durations = [gt.time.tmax for stimulus, gt in zip(STIMULI, envelope)]
+    return durations
+
+def alice_get_models(exclude=[]):
+    envelopes_log = eelbrain.load.unpickle(ALICE_PROCESSED_PREDICTOR_DIR / f'~processed_envelopes-log.pickle')
+    envelopes_onset = eelbrain.load.unpickle(ALICE_PROCESSED_PREDICTOR_DIR / f'~processed_envelopes-onset.pickle')
+
+    models = {
+    'envelope_log': [envelopes_log],
+    'envelope_onset': [envelopes_onset],
+    # Compare different scales for the acoustic response
+    #'envelope_log_8band': [envelopes_log_8band],
+    # The acoustic edge detection model
+    'envelope_log_onset': [envelopes_log, envelopes_onset],
+    #'envelope_onset_8band': [envelopes_onset_8band],
+    #'acoustic_8band': [envelopes_log_8band, envelopes_onset_8band],
+    # Models with word-onsets and word-class
+    #'words': [envelopes_words_onset],
+    #'words+lexical': [envelopes_words_onset, envelopes_words_lexical, envelopes_words_nlexical],
+    #'acoustic+words': [envelopes_log_8band, envelopes_onset_8band, envelopes_words_onset],
+    #'acoustic+words+lexical': [envelopes_log_8band, envelopes_onset_8band, envelopes_words_onset, 
+    #                           envelopes_words_lexical, envelopes_words_nlexical],
+}
+    if exclude != []:
+        for exclution in exclude:
+            models.pop(exclution)
+    return models
+
+
 
 
 # =============================================================================
@@ -411,44 +420,91 @@ def get_trials(subject):
     print(f"{subject}: loaded {len(trials)} trials")
     return trials
 
+
+
+
 # =============================================================================
-# ALICE FUNCTIONS
+# SNHL FUNCTIONS
 # =============================================================================
 
-# Utility function to get subject list
-def alice_get_subjects():
-    subjects = [path.name for path in ALICE_EEG_DIR.iterdir() if path.is_dir()]
-    subjects = sorted(subjects, key=lambda x: int(re.search(r'S(\d+)', x).group(1)))
-    return subjects
 
-def alice_get_durations(envelope, STIMULI):
-    durations = [gt.time.tmax for stimulus, gt in zip(STIMULI, envelope)]
-    return durations
+def get_subjects_snhl(is_hi=False):
+    participants = pd.read_csv(SNHL_ROOT / 'participants.tsv', sep='\t')
+    nh_subjects = participants[participants['hearing_status'] == 'nh']['participant_id'].tolist()
+    hi_subjects = participants[participants['hearing_status'] == 'hi']['participant_id'].tolist()
+    return hi_subjects if is_hi else nh_subjects
 
-def alice_get_models(exclude=[]):
-    envelopes_log = eelbrain.load.unpickle(ALICE_PROCESSED_PREDICTOR_DIR / f'~processed_envelopes-log.pickle')
-    envelopes_onset = eelbrain.load.unpickle(ALICE_PROCESSED_PREDICTOR_DIR / f'~processed_envelopes-onset.pickle')
 
-    models = {
-    'envelope_log': [envelopes_log],
-    'envelope_onset': [envelopes_onset],
-    # Compare different scales for the acoustic response
-    #'envelope_log_8band': [envelopes_log_8band],
-    # The acoustic edge detection model
-    'envelope_log_onset': [envelopes_log, envelopes_onset],
-    #'envelope_onset_8band': [envelopes_onset_8band],
-    #'acoustic_8band': [envelopes_log_8band, envelopes_onset_8band],
-    # Models with word-onsets and word-class
-    #'words': [envelopes_words_onset],
-    #'words+lexical': [envelopes_words_onset, envelopes_words_lexical, envelopes_words_nlexical],
-    #'acoustic+words': [envelopes_log_8band, envelopes_onset_8band, envelopes_words_onset],
-    #'acoustic+words+lexical': [envelopes_log_8band, envelopes_onset_8band, envelopes_words_onset, 
-    #                           envelopes_words_lexical, envelopes_words_nlexical],
-}
-    if exclude != []:
-        for exclution in exclude:
-            models.pop(exclution)
-    return models
+# Build trial table for subject function -----------------------------------
+def get_trials_snhl(subject_id):
+    tsv_path = SNHL_ROOT / subject_id / 'eeg' / f'{subject_id}_task-selectiveattention_events.tsv'
+    events = pd.read_csv(tsv_path, sep='\t')
+
+    targets  = events[events['trigger_type'] == 'targetonset'].reset_index(drop=True)
+    ends     = events[events['trigger_type'] == 'trialend'].reset_index(drop=True)
+    maskers  = events[events['trigger_type'] == 'maskeronset'].reset_index(drop=True)
+
+    # Build trial table
+    trials = targets.copy()
+    trials['end_sample'] = ends['sample'].values
+    trials['end_onset']  = ends['onset'].values
+    trials['difficulty'] = ends['diffulty_ratings'].values
+    trials['score']      = ends['questionnaire_scores'].values
+
+    # Add masker info
+    two_talker_mask = trials['single_talker_two_talker'] == 'twotalker'
+    trials.loc[two_talker_mask, 'masker_stim_file']  = maskers['stim_file'].values
+    trials.loc[two_talker_mask, 'masker_sample']     = maskers['sample'].values
+    trials.loc[two_talker_mask, 'masker_onset']      = maskers['onset'].values
+
+    return trials[two_talker_mask].reset_index(drop=True)
+
+
+def get_stimuli_paths_snhl(stimuli_dir, subject_ids):
+    """Returns a list of dicts with path, role, and subject for each stimulus."""
+    stimuli = []
+    
+    for subject_id in subject_ids:
+        trials = get_trials_snhl(subject_id)
+        subject_id = subject_id.replace('-', '')  # Remove '-' in sub-001 for path construction
+        
+        for stim_file in trials['stim_file'].dropna().unique():
+            stimuli.append({
+                'path': stimuli_dir / stim_file,
+                'role': 'target',
+                'subject': subject_id,
+                'stem': Path(stim_file).stem,
+            })
+        
+        for stim_file in trials['masker_stim_file'].dropna().unique():
+            stimuli.append({
+                'path': stimuli_dir / stim_file,
+                'role': 'masker',
+                'subject': subject_id,
+                'stem': Path(stim_file).stem,
+            })
+    
+    return stimuli
+
+def load_predictor_snhl(subject_id, stim_file, role, predictor_type = PREDICTOR_TYPE.ENVELOPE):
+    """Load envelope or envelope onset for a given subject, stimulus, and role."""
+    if predictor_type == PREDICTOR_TYPE.ENVELOPE:
+        dir = SNHL_ENVELOPES_DIR
+    elif predictor_type == PREDICTOR_TYPE.ENVELOPE_ONSET:
+        dir = SNHL_ONSET_DIR
+    else:
+        raise ValueError(f"Unknown predictor type: {predictor_type}")
+
+    path = dir / subject_id.replace('-', '') / role / f"{Path(stim_file).stem}~{predictor_type.value}.pickle"
+    
+    if not path.exists():
+        print(f"Missing predictor file: {path}")
+        return None
+    
+    return eelbrain.load.unpickle(path)
+
+
+
 
 
 # =============================================================================
