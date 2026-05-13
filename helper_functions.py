@@ -512,23 +512,37 @@ def load_predictor_snhl(subject_id, stim_file, role, predictor_type = PREDICTOR_
 # =============================================================================
 
 def set_plot_style():
-    FONT      = 'Arial'
-    FONT_SIZE = 8
+
+    FONT = 'Arial'
+
+    BASE_SIZE = 10
+    TITLE_SIZE = 16
+
     RC = {
         'figure.dpi':          100,
         'savefig.dpi':         300,
         'savefig.transparent': True,
+
         'font.family':         'sans-serif',
         'font.sans-serif':     FONT,
-        'font.size':           FONT_SIZE,
-        'figure.labelsize':    FONT_SIZE,
-        'figure.titlesize':    FONT_SIZE,
-        'axes.labelsize':      FONT_SIZE,
-        'axes.titlesize':      FONT_SIZE,
-        'xtick.labelsize':     FONT_SIZE,
-        'ytick.labelsize':     FONT_SIZE,
-        'legend.fontsize':     FONT_SIZE,
+        'font.size':           BASE_SIZE,
+
+        # Figure
+        'figure.labelsize':    BASE_SIZE,
+        'figure.titlesize':    TITLE_SIZE,
+
+        # Axes
+        'axes.labelsize':      BASE_SIZE,
+        'axes.titlesize':      TITLE_SIZE,
+
+        # Ticks
+        'xtick.labelsize':     BASE_SIZE,
+        'ytick.labelsize':     BASE_SIZE,
+
+        # Legend
+        'legend.fontsize':     BASE_SIZE,
     }
+
     plt.rcParams.update(RC)
 
 
